@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Barebone Macro Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 max-w-md mx-auto p-4 font-mono text-sm select-none">
+  <h1 class="text-xl font-bold mb-4 border-b border-gray-700 pb-2">Macro Tracker</h1>
+
+  <!-- Date Selector & Settings -->
+  <div class="mb-4 bg-gray-800 p-3 rounded space-y-3">
+    <div>
+      <label class="block text-xs text-gray-400 mb-1">Selected Date</label>
+      <input id="datePicker" type="date" onchange="render()" class="bg-gray-700 px-2 py-1 rounded w-full text-white">
+    </div>
+    <div>
+      <label class="block text-xs text-gray-400 mb-1">Daily Calorie Target</label>
+      <div class="flex gap-2">
+        <input id="targetInput" type="number" class="bg-gray-700 px-2 py-1 rounded w-full text-white" value="2000">
+        <button onclick="saveTarget()" class="bg-blue-600 px-3 py-1 rounded font-bold">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Backup & Restore -->
+  <div class="mb-6 bg-gray-800 p-3 rounded flex gap-2">
+    <button onclick="exportData()" class="w-1/2 bg-purple-600 py-1.5 rounded font-bold text-xs">Export Backup</button>
+    <label class="w-1/2 bg-gray-700 py-1.5 rounded font-bold text-xs text-center cursor-pointer flex items-center justify-center">
+      Import Backup
+      <input type="file" id="importFile" onchange="importData(event)" class="hidden" accept=".json">
+    </label>
+  </div>
+
+  <!-- Add / Edit Food Form -->
+  <div class="mb-6 bg-gray-800 p-3 rounded">
+    <h2 id="formTitle" class="font-bold mb-2 text-gray-300">Log Entry</h2>
+    <input id="editIdx" type="hidden" value="-1">
+    <input id="foodName" type="text" placeholder="Food Name" class="w-full bg-gray-700 p-2 mb-2 rounded text-white">
+    <div class="grid grid-cols-4 gap-2 mb-2">
+      <input id="cal" type="number" placeholder="Cal" class="bg-gray-700 p-1 rounded text-center text-white">
+      <input id="p" type="number" placeholder="Pro (g)" class="bg-gray-700 p-1 rounded text-center text-white">
+      <input id="c" type="number" placeholder="Carb (g)" class="bg-gray-700 p-1 rounded text-center text-white">
+      <input id="f" type="number" placeholder="Fat (g)" class="bg-gray-700 p-1 rounded text-center text-white">
+    </div>
+    <div class="flex gap-2">
+      <button id="saveBtn" onclick="saveEntry()" class="w-full bg-green-600 py-2 rounded font-bold">Add Entry</button>
+      <button id="cancelBtn" onclick="resetForm()" class="hidden bg-gray-600 px-3 py-2 rounded font-bold">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Selected Day Summary -->
+  <div class="mb-6 bg-gray-800 p-3 rounded">
+    <h2 class="font-bold border-b border-gray-700 pb-1 mb-2">Selected Day Summary</h2>
+    <div id="dayTotals" class="grid grid-cols-2 gap-2 text-xs mb-3"></div>
+    <ul id="dayLog" class="border-t border-gray-700 pt-2 space-y-2 text-gray-300"></ul>
+  </div>
+
+  <!-- Adjusted Targets for Selected Day -->
+  <div class="mb-6 bg-gray-800 p-3 rounded">
+    <h2 class="font-bold border-b border-gray-700 pb-1 mb-2">Today's Adjusted Targets</h2>
+    <div class="space-y-1 text-xs">
+      <div>Instant Fix: <span id="instantFix" class="font-bold text-yellow-400 ml-1">-</span></div>
+      <div>Gradual Fix: <span id="gradualFix" class="font-bold text-green-400 ml-1">-</span></div>
+    </div>
+  </div>
+
+  <!-- Weekly Summary -->
+  <div class="bg-gray-800 p-3 rounded">
+    <h2 class="font-bold border-b border-gray-700 pb-1 mb-2">Weekly Summary (Mon–Sun)</h2>
+    <div id="weeklyTotals" class="text-xs space-y-1"></div>
+  </div>
+
+  <script>
+    const getStorage = (key, def) => JSON.parse(localStorage.getItem(key)) || def;
+    const setStorage = (key, val) => localStorage.setItem(key, JSON.stringify(val));
+
+    function getLocalDateString(dateObj) {
+      const year = dateObj.getFullYear();
+      const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const day = String(dateObj.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    function setDateToToday() {
+      document.getElementById('datePicker').value = getLocalDateString(new Date());
+    }
+
+    setDateToToday();
+
+    window.addEventListener('focus', () => {
+      setDateToToday();
+      render();
+    });
+
+    function saveTarget() {
+      setStorage('dailyTarget', Number(document.getElementById('targetInput').value));
+      render();
+    }
+
+    function exportData() {
+      const data = {
+        dailyTarget: getStorage('dailyTarget', 2000),
+        logs: getStorage('logs', {})
+      };
+      
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      
+      a.href = url;
+      a.download = `macro_tracker_backup_${getLocalDateString(new Date())}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function importData(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const data = JSON.parse(e.target.result);
+          if (data.logs && data.dailyTarget !== undefined) {
+            setStorage('logs', data.logs);
+            setStorage('dailyTarget', data.dailyTarget);
+            alert('Data imported successfully!');
+            render();
+          } else {
+            alert('Invalid backup file structure.');
+          }
+        } catch (err) {
+          alert('Error reading the JSON backup file.');
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function saveEntry() {
+      const selectedDate = document.getElementById('datePicker').value;
+      const idx = Number(document.getElementById('editIdx').value);
+      const name = document.getElementById('foodName').value || 'Entry';
+      const cal = Number(document.getElementById('cal').value) || 0;
+      const p = Number(document.getElementById('p').value) || 0;
+      const c = Number(document.getElementById('c').value) || 0;
+      const f = Number(document.getElementById('f').value) || 0;
+
+      const logs = getStorage('logs', {});
+      if (!logs[selectedDate]) logs[selectedDate] = [];
+
+      if (idx === -1) {
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        logs[selectedDate].push({ name, cal, p, c, f, timestamp: `${selectedDate} ${timeStr}` });
+      } else {
+        logs[selectedDate][idx] = { 
+          ...logs[selectedDate][idx], 
+          name, cal, p, c, f 
+        };
+      }
+
+      setStorage('logs', logs);
+      resetForm();
+      render();
+    }
+
+    function editEntry(idx) {
+      const selectedDate = document.getElementById('datePicker').value;
+      const logs = getStorage('logs', {});
+      const item = logs[selectedDate][idx];
+
+      document.getElementById('editIdx').value = idx;
+      document.getElementById('foodName').value = item.name;
+      document.getElementById('cal').value = item.cal;
+      document.getElementById('p').value = item.p;
+      document.getElementById('c').value = item.c;
+      document.getElementById('f').value = item.f;
+
+      document.getElementById('formTitle').innerText = 'Edit Entry';
+      document.getElementById('saveBtn').innerText = 'Update Entry';
+      document.getElementById('saveBtn').className = 'w-full bg-yellow-600 py-2 rounded font-bold';
+      document.getElementById('cancelBtn').classList.remove('hidden');
+    }
+
+    function deleteEntry(idx) {
+      const selectedDate = document.getElementById('datePicker').value;
+      const logs = getStorage('logs', {});
+      logs[selectedDate].splice(idx, 1);
+      setStorage('logs', logs);
+      render();
+    }
+
+    function resetForm() {
+      document.getElementById('editIdx').value = -1;
+      document.getElementById('foodName').value = '';
+      document.getElementById('cal').value = '';
+      document.getElementById('p').value = '';
+      document.getElementById('c').value = '';
+      document.getElementById('f').value = '';
+
+      document.getElementById('formTitle').innerText = 'Log Entry';
+      document.getElementById('saveBtn').innerText = 'Add Entry';
+      document.getElementById('saveBtn').className = 'w-full bg-green-600 py-2 rounded font-bold';
+      document.getElementById('cancelBtn').classList.add('hidden');
+    }
+
+    function render() {
+      const target = getStorage('dailyTarget', 2000);
+      document.getElementById('targetInput').value = target;
+
+      const selectedDate = document.getElementById('datePicker').value;
+      const logs = getStorage('logs', {});
+      const dayLogs = logs[selectedDate] || [];
+
+      // Selected Day Totals
+      const sum = dayLogs.reduce((acc, x) => {
+        acc.cal += x.cal; acc.p += x.p; acc.c += x.c; acc.f += x.f;
+        return acc;
+      }, { cal: 0, p: 0, c: 0, f: 0 });
+
+      document.getElementById('dayTotals').innerHTML = `
+        <div>Calories: <b>${sum.cal}</b> / ${target}</div>
+        <div>Protein: <b>${sum.p}g</b></div>
+        <div>Carbs: <b>${sum.c}g</b></div>
+        <div>Fat: <b>${sum.f}g</b></div>
+      `;
+
+      document.getElementById('dayLog').innerHTML = dayLogs.map((l, i) => `
+        <li class="bg-gray-800 p-2 rounded border border-gray-700">
+          <div class="flex justify-between items-center mb-1">
+            <span class="font-bold text-white">${l.name}</span>
+            <span class="text-gray-400 text-[10px]">${l.timestamp || selectedDate}</span>
+          </div>
+          <div class="flex justify-between items-center text-xs text-gray-400">
+            <span>${l.cal} kcal | P:${l.p} C:${l.c} F:${l.f}</span>
+            <div class="space-x-2">
+              <button onclick="editEntry(${i})" class="text-yellow-400 hover:underline">Edit</button>
+              <button onclick="deleteEntry(${i})" class="text-red-400 hover:underline">Del</button>
+            </div>
+          </div>
+        </li>
+      `).join('') || '<li class="text-gray-500">No entries for this date</li>';
+
+      // Parse current date
+      const dateParts = selectedDate.split('-');
+      const d = new Date(Number(dateParts[0]), Number(dateParts[1]) - 1, Number(dateParts[2]));
+      const dayOfWeek = d.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+
+      // Find Monday of the current selected week
+      const monday = new Date(d);
+      const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      monday.setDate(d.getDate() - daysToSubtract);
+
+      // Accumulate overage/underage from Monday up to (but not including) Selected Date
+      let cumulativeDiff = 0;
+      let pastDaysCount = 0;
+
+      for (let i = 0; i < daysToSubtract; i++) {
+        const pastD = new Date(monday);
+        pastD.setDate(monday.getDate() + i);
+        const pastKey = getLocalDateString(pastD);
+        const pastLogs = logs[pastKey] || [];
+        const pastCal = pastLogs.reduce((acc, x) => acc + x.cal, 0);
+        
+        cumulativeDiff += (pastCal - target);
+        pastDaysCount++;
+      }
+
+      // Remaining days in the week starting from the selected date (Mon=7 ... Sun=1)
+      const daysRemainingInWeek = dayOfWeek === 0 ? 1 : (8 - dayOfWeek);
+
+      document.getElementById('instantFix').innerText = `${target - cumulativeDiff} kcal`;
+      document.getElementById('gradualFix').innerText = `${Math.round(target - (cumulativeDiff / daysRemainingInWeek))} kcal`;
+
+      // Weekly calculation Mon-Sun
+      let weekSum = { cal: 0, p: 0, c: 0, f: 0, count: 0 };
+
+      for (let i = 0; i < 7; i++) {
+        const tempD = new Date(monday);
+        tempD.setDate(monday.getDate() + i);
+        const k = getLocalDateString(tempD);
+        
+        if (logs[k] && logs[k].length > 0) {
+          logs[k].forEach(x => {
+            weekSum.cal += x.cal; weekSum.p += x.p; weekSum.c += x.c; weekSum.f += x.f;
+          });
+          weekSum.count++;
+        }
+      }
+
+      const daysLogged = weekSum.count || 1;
+      document.getElementById('weeklyTotals').innerHTML = `
+        <div>Weekly Total: <b>${weekSum.cal}</b> kcal | P:${weekSum.p}g C:${weekSum.c}g F:${weekSum.f}g</div>
+        <div>Daily Avg: <b>${Math.round(weekSum.cal / daysLogged)}</b> kcal | P:${(weekSum.p / daysLogged).toFixed(1)}g C:${(weekSum.c / daysLogged).toFixed(1)}g F:${(weekSum.f / daysLogged).toFixed(1)}g</div>
+      `;
+    }
+
+    render();
+  </script>
+</body>
+</html>
